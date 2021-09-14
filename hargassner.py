@@ -31,8 +31,8 @@ class HargassnerMessageTemplates:
 
 
 class HargassnerParameter:
-    
-    _DESCRIPTIONS = { "ZK":"boiler state", "O2":"o2", "O2soll":"o2 target", "TK":"boiler temperature", "TKsoll":"boiler temperature target", "TRG":"smoke gas temperature", 
+
+    _DESCRIPTIONS = { "ZK":"boiler state", "O2":"o2", "O2soll":"o2 target", "TK":"boiler temperature", "TKsoll":"boiler temperature target", "TRG":"smoke gas temperature",
                       "SZist":"draft", "SZsoll":"draft target", "Leistung":"output", "ESsoll":"delivery rate", "I Es":"drawer current", "I Sr":"grate current", "I Rein":"cleaning current",
                       "Taus":"outside temperature", "TA Gem.":"mean outside temperature", "TPo":"buffer temperature top", "TPm":"buffer temperature center", "TPu":"buffer temperature bottom",
                       "TRL":"return temperature", "TRLsoll":"return temperature target", "LZ ES seit Füll.":"runtime since refill", "LZ ES seit Ent.":"runtime since ash removal",
@@ -42,48 +42,48 @@ class HargassnerParameter:
                       "TVL_5":"flow 5 temperature", "TVLs_5":"flow 5 temperature target", "TVL_6":"flow 6 temperature", "TVLs_6":"flow 6 temperature target",
                       "TB1":"hot water 1 temperature", "TBs_1":"hot water 1 temperature target", "TB2":"hot water 2 temperature", "TBs_2":"hot water 2 temperature target",
                       "TB3":"hot water 3 temperature", "TBs_3":"hot water 3 temperature target", "Störung":"error" }
-    
+
     def __init__(self, key, index, unit):
         self._key = key
         self._index = index
         self._value = None
         self._unit = unit
-        
+
     def __str__(self):
         if self.value(): return self.description() + " : " + self.value() + " " + self.unit()
         else: return self.description() + " : unknown"
-    
+
     def key(self):
         return self._key
-    
+
     def index(self):
         return self._index
-            
+
     def value(self):
         return self._value
-    
+
     def unit(self):
         return self._unit
-    
+
     def description(self):
         return HargassnerParameter._DESCRIPTIONS.get(self.key(), self.key())
 
 
 class HargassnerAnalogueParameter(HargassnerParameter):
-    
+
     def __init__(self, key, index, unit):
         super().__init__(key, index, unit)
-        
+
     def initializeFromMessage(self, msg):
         self._value = msg[self._index]
 
 
 class HargassnerDigitalParameter(HargassnerParameter):
-    
+
     def __init__(self, key, index, bitmask):
         super().__init__(key, index, "")
         self._bitmask = bitmask
-    
+
     def initializeFromMessage(self, msg):
         self._value = (str)(((int)(msg[self._index], 16) & self._bitmask) > 0)
 
@@ -91,10 +91,10 @@ class HargassnerDigitalParameter(HargassnerParameter):
 
 
 class HargassnerBridge:
-       
+
     def __init__(self, hostIP, updateInterval=1.0, msgFormat=HargassnerMessageTemplates.NANO_V14L):
         self._hostIP = hostIP
-        self._telnet = Telnet(hostIP)
+        self._telnet = Telnet(timeout=20)
         self._connectionOK = False
         self._latestUpdate = None
         self._paramData = {}
@@ -105,86 +105,93 @@ class HargassnerBridge:
         if updateInterval<0.5: updateInterval=0.5 # Hargassner sends 2 messages per second, no need to poll more frequent than that
         self._scheduler.add_job(lambda:self._update(),'interval',seconds=updateInterval)
         self._scheduler.start()
-        
+
     def setMessageFormat(self, msgFormat):
         if msgFormat in HargassnerMessageTemplates.DICT:
             msgFormat = HargassnerMessageTemplates.DICT[msgFormat] # if one of the constants has been passed, expand to full format string
         if not msgFormat.startswith("<DAQPRJ>"):
-            _LOGGER.error("HargassnerBridge.setMessageFormat(): Message template does not start with '<DAQPRJ>'.\n")
+            _LOGGER.error(f"Message template does not start with '<DAQPRJ>'.")
             return False
         self._paramData = {}
         root = xml.fromstring(msgFormat)
         analog = root.find("ANALOG")
         for channel in analog.findall("CHANNEL"):
-            uniqueName = (str)(channel.get("name"))
+            uniqueName = str(channel.get("name"))
             nameCount = 1
             while uniqueName in self._paramData: # in case parameter name is duplicate, add a counter to make it unique
                 nameCount += 1
-                uniqueName = (str)(channel.get("name")) + "_" + str(nameCount)
-            self._paramData[uniqueName] = HargassnerAnalogueParameter( uniqueName, (int)(channel.get("id")), (str)(channel.get("unit")))
+                uniqueName = str(channel.get("name")) + "_" + str(nameCount)
+            self._paramData[uniqueName] = HargassnerAnalogueParameter(uniqueName, int(channel.get("id")), str(channel.get("unit")))
         ofsDigital = len(self._paramData) # assuming that channel ids/indices are listed consecutively without any misses!
         lenDigital = 0
         digital = root.find("DIGITAL")
         for channel in digital.findall("CHANNEL"):
-            self._paramData[(str)(channel.get("name"))] = HargassnerDigitalParameter( (str)(channel.get("name")), ofsDigital + (int)(channel.get("id")),  1 << (int)(channel.get("bit")))
-            lenDigital = (int)(channel.get("id")) + 1 # assuming that channel ids are increasing
+            self._paramData[str(channel.get("name"))] = HargassnerDigitalParameter(str(channel.get("name")), ofsDigital + (int)(channel.get("id")), 1 << (int)(channel.get("bit")))
+            lenDigital = int(channel.get("id")) + 1 # assuming that channel ids are increasing
         self._expectedMsgLength = ofsDigital + lenDigital
-        _LOGGER.info("HargassnerBridge.setMessageFormat(): successfully parsed " + (str)(self._expectedMsgLength) + " elements.\n")
+        _LOGGER.info(f"Successfully parsed {str(self._expectedMsgLength)} elements.")
         return True
-        
+
     def close(self):
-        _LOGGER.info("HargassnerBridge.close(): Closing connection...\n")
+        _LOGGER.info("Closing connection...")
         self._scheduler.shutdown()
         self._telnet.close()
-        
+
     def _update(self):
         if self._connectionOK:
             try:
                 data = self._telnet.read_very_eager()
             except EOFError as error:
-                _LOGGER.error("HargassnerBridge._update(): Telnet connection error (" + (str)(error) + ")\n")
+                _LOGGER.error(f"Connection error ({str(error)})")
                 self._connectionOK = False
-                return    
+                return
             msg = data.decode("ascii")
-            lastMsgStart = msg.rfind("pm ")
-            if lastMsgStart < 0:
+            last_msg_start = msg.rfind("pm ")
+            if last_msg_start < 0:
                 self._emptyMessages += 1
-                _LOGGER.info("HargassnerBridge._update(): Received message contains no data. (" + str(self._emptyMessages) + ")\n")
+                _LOGGER.info(f"Received message contains no data. ({str(self._emptyMessages)})")
                 if self._emptyMessages >= 10:
                     self._emptyMessages = 0
-                    _LOGGER.info("HargassnerBridge._update(): Connections seems broken. Opening connection...\n")
-                    self._telnet.open(self._hostIP)
-                    self._connectionOK = True
+                    _LOGGER.warning("Connections seems broken.")
+                    self.openConnection()
                 return
-            msg = msg[lastMsgStart+3:-3].split(' ')
-            if  len(msg) != self._expectedMsgLength:
-                _LOGGER.error("HargassnerBridge._update(): Received message has unexpected length. (expected: " + str(self._expectedMsgLength) + " got: " + str(len(msg)) + ")\n")
+            msg = msg[last_msg_start+3:-3].split(' ')
+            if len(msg) != self._expectedMsgLength:
+                _LOGGER.error(f"Received message has unexpected length. (expected: {str(self._expectedMsgLength)} got: {str(len(msg))})")
                 return
             self._emptyMessages = 0
             for param in self._paramData.values():
                 param.initializeFromMessage(msg)
             self._latestUpdate = datetime.now()
         else:
-            _LOGGER.info("HargassnerBridge._update(): Opening connection...\n")
-            self._telnet.open(self._hostIP)
+            self.openConnection()
+
+    def openConnection(self):
+        _LOGGER.info("Opening connection...")
+        try:
+            self._telnet.close()
+            self._telnet.open(self._hostIP, timeout=20)
             self._connectionOK = True
-    
+        except Exception as ex:
+            _LOGGER.warning(f"Error opening connection. ({str(ex)})")
+            self._connectionOK = False
+
     def getValue(self, paramName):
         param = self._paramData.get(paramName)
-        if param==None: 
-            _LOGGER.error("HargassnerBridge.getValue(): Parameter key " + paramName + " not known.\n")
-            return None 
+        if param==None:
+            _LOGGER.error(f"Parameter key {paramName} not known.")
+            return None
         return param.value()
-    
+
     def getUnit(self, paramName):
         param = self._paramData.get(paramName)
-        if param==None: 
-            _LOGGER.error("HargassnerBridge.getUnit(): Parameter key " + paramName + " not known.\n")
-            return None 
+        if param==None:
+            _LOGGER.error(f"Parameter key {paramName} not known.")
+            return None
         return param.unit()
-    
+
     def data(self):
         return self._paramData
-    
+
     def latestUpdateTime(self):
         return self._latestUpdate
