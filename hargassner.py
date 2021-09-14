@@ -5,7 +5,7 @@ Created on Wed Mar  3 22:22:58 2021
 @author: Tobias
 """
 
-
+import logging
 from apscheduler.schedulers.background import BackgroundScheduler
 from telnetlib import Telnet
 from datetime import datetime
@@ -13,7 +13,7 @@ import xml.etree.ElementTree as xml
 from pytz import utc
 
 
-
+_LOGGER = logging.getLogger(__name__)
 
 class HargassnerMessageTemplates:
 
@@ -99,8 +99,7 @@ class HargassnerBridge:
         self._latestUpdate = None
         self._paramData = {}
         self._expectedMsgLength = 0
-        self._errorLog = ""
-        self._infoLog = ""
+        self._emptyMessages = 0
         self.setMessageFormat(msgFormat)
         self._scheduler = BackgroundScheduler(timezone=utc)
         if updateInterval<0.5: updateInterval=0.5 # Hargassner sends 2 messages per second, no need to poll more frequent than that
@@ -111,7 +110,7 @@ class HargassnerBridge:
         if msgFormat in HargassnerMessageTemplates.DICT:
             msgFormat = HargassnerMessageTemplates.DICT[msgFormat] # if one of the constants has been passed, expand to full format string
         if not msgFormat.startswith("<DAQPRJ>"):
-            self._errorLog += "HargassnerBridge.setMessageFormat(): Message template does not start with '<DAQPRJ>'.\n"
+            _LOGGER.error("HargassnerBridge.setMessageFormat(): Message template does not start with '<DAQPRJ>'.\n")
             return False
         self._paramData = {}
         root = xml.fromstring(msgFormat)
@@ -130,11 +129,11 @@ class HargassnerBridge:
             self._paramData[(str)(channel.get("name"))] = HargassnerDigitalParameter( (str)(channel.get("name")), ofsDigital + (int)(channel.get("id")),  1 << (int)(channel.get("bit")))
             lenDigital = (int)(channel.get("id")) + 1 # assuming that channel ids are increasing
         self._expectedMsgLength = ofsDigital + lenDigital
-        self._infoLog += "HargassnerBridge.setMessageFormat(): successfully parsed " + (str)(self._expectedMsgLength) + " elements.\n"
+        _LOGGER.info("HargassnerBridge.setMessageFormat(): successfully parsed " + (str)(self._expectedMsgLength) + " elements.\n")
         return True
         
     def close(self):
-        self._infoLog += "HargassnerBridge.close(): Closing connection...\n"
+        _LOGGER.info("HargassnerBridge.close(): Closing connection...\n")
         self._scheduler.shutdown()
         self._telnet.close()
         
@@ -143,37 +142,44 @@ class HargassnerBridge:
             try:
                 data = self._telnet.read_very_eager()
             except EOFError as error:
-                self._errorLog += "HargassnerBridge._update(): Telnet connection error (" + (str)(error) + ")\n"
+                _LOGGER.error("HargassnerBridge._update(): Telnet connection error (" + (str)(error) + ")\n")
                 self._connectionOK = False
                 return    
             msg = data.decode("ascii")
             lastMsgStart = msg.rfind("pm ")
-            if lastMsgStart < 0: 
-                self._infoLog += "HargassnerBridge._update(): Received message contains no data.\n"
+            if lastMsgStart < 0:
+                self._emptyMessages += 1
+                _LOGGER.info("HargassnerBridge._update(): Received message contains no data. (" + str(self._emptyMessages) + ")\n")
+                if self._emptyMessages >= 10:
+                    self._emptyMessages = 0
+                    _LOGGER.info("HargassnerBridge._update(): Connections seems broken. Opening connection...\n")
+                    self._telnet.open(self._hostIP)
+                    self._connectionOK = True
                 return
             msg = msg[lastMsgStart+3:-3].split(' ')
             if  len(msg) != self._expectedMsgLength:
-                self._errorLog += "HargassnerBridge._update(): Received message has unexpected length.\n"
+                _LOGGER.error("HargassnerBridge._update(): Received message has unexpected length. (expected: " + str(self._expectedMsgLength) + " got: " + str(len(msg)) + ")\n")
                 return
+            self._emptyMessages = 0
             for param in self._paramData.values():
                 param.initializeFromMessage(msg)
             self._latestUpdate = datetime.now()
         else:
-            self._infoLog += "HargassnerBridge._update(): Opening connection...\n"
+            _LOGGER.info("HargassnerBridge._update(): Opening connection...\n")
             self._telnet.open(self._hostIP)
             self._connectionOK = True
     
     def getValue(self, paramName):
         param = self._paramData.get(paramName)
         if param==None: 
-            self._errorLog += "HargassnerBridge.getValue(): Parameter key " + paramName + " not known.\n"
+            _LOGGER.error("HargassnerBridge.getValue(): Parameter key " + paramName + " not known.\n")
             return None 
         return param.value()
     
     def getUnit(self, paramName):
         param = self._paramData.get(paramName)
         if param==None: 
-            self._errorLog += "HargassnerBridge.getUnit(): Parameter key " + paramName + " not known.\n"
+            _LOGGER.error("HargassnerBridge.getUnit(): Parameter key " + paramName + " not known.\n")
             return None 
         return param.unit()
     
@@ -182,13 +188,3 @@ class HargassnerBridge:
     
     def latestUpdateTime(self):
         return self._latestUpdate
-    
-    def getErrorLog(self):
-        log = self._errorLog
-        self._errorLog = ""
-        return log
-    
-    def getInfoLog(self):
-        log = self._infoLog
-        self._infoLog = ""
-        return log

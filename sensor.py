@@ -21,8 +21,6 @@ def setup_platform(hass, config, add_entities, discovery_info=None):
     paramSet = hass.data[DOMAIN][CONF_PARAMS]
     lang = hass.data[DOMAIN][CONF_LANG]
     bridge = HargassnerBridge(host, msgFormat=format)
-    errorLog = bridge.getErrorLog()
-    if errorLog != "": _LOGGER.error(errorLog)
     if paramSet == CONF_PARAMS_FULL:
         entities = []
         for p in bridge.data().values(): 
@@ -127,10 +125,6 @@ class HargassnerErrorSensor(HargassnerSensor):
             else:
                 self._state = errorDescr
             self._icon = "mdi:alert"
-        errorLog = self._bridge.getErrorLog()
-        if errorLog != "": _LOGGER.error(errorLog)
-        infoLog = self._bridge.getInfoLog()
-        if infoLog != "": _LOGGER.info(infoLog)
 
 
 class HargassnerStateSensor(HargassnerSensor):
