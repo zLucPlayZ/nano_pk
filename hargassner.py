@@ -85,7 +85,7 @@ class HargassnerDigitalParameter(HargassnerParameter):
         self._bitmask = bitmask
 
     def initializeFromMessage(self, msg):
-        self._value = (str)(((int)(msg[self._index], 16) & self._bitmask) > 0)
+        self._value = str((int(msg[self._index], 16) & self._bitmask) > 0)
 
 
 
@@ -126,7 +126,7 @@ class HargassnerBridge:
         lenDigital = 0
         digital = root.find("DIGITAL")
         for channel in digital.findall("CHANNEL"):
-            self._paramData[str(channel.get("name"))] = HargassnerDigitalParameter(str(channel.get("name")), ofsDigital + (int)(channel.get("id")), 1 << (int)(channel.get("bit")))
+            self._paramData[str(channel.get("name"))] = HargassnerDigitalParameter(str(channel.get("name")), ofsDigital + int(channel.get("id")), 1 << int(channel.get("bit")))
             lenDigital = int(channel.get("id")) + 1 # assuming that channel ids are increasing
         self._expectedMsgLength = ofsDigital + lenDigital
         _LOGGER.info(f"Successfully parsed {str(self._expectedMsgLength)} elements.")
@@ -149,7 +149,10 @@ class HargassnerBridge:
             last_msg_start = msg.rfind("pm ")
             if last_msg_start < 0:
                 self._emptyMessages += 1
-                _LOGGER.info(f"Received message contains no data. ({str(self._emptyMessages)})")
+                if self._emptyMessages >= 5:
+                    _LOGGER.info(f"Received message contains no data. ({str(self._emptyMessages)})")
+                else:
+                    _LOGGER.debug(f"Received message contains no data. ({str(self._emptyMessages)})")
                 if self._emptyMessages >= 10:
                     self._emptyMessages = 0
                     _LOGGER.warning("Connections seems broken.")
@@ -168,13 +171,17 @@ class HargassnerBridge:
 
     def openConnection(self):
         _LOGGER.info("Opening connection...")
+        self._scheduler.pause()
+        self._connectionOK = False
         try:
             self._telnet.close()
             self._telnet.open(self._hostIP, timeout=20)
             self._connectionOK = True
+            _LOGGER.info("Successfully opened connection.")
         except Exception as ex:
             _LOGGER.warning(f"Error opening connection. ({str(ex)})")
             self._connectionOK = False
+        self._scheduler.resume()
 
     def getValue(self, paramName):
         param = self._paramData.get(paramName)
