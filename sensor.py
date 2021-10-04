@@ -138,7 +138,7 @@ class HargassnerStateSensor(HargassnerSensor):
         "9": {CONF_LANG_DE: "Warten auf EA", CONF_LANG_EN: "Waiting for AR"},
         "10": {CONF_LANG_DE: "Entaschung", CONF_LANG_EN: "Ash removal"},
         "12": {CONF_LANG_DE: "Putzen", CONF_LANG_EN: "Cleaning"},
-        UNKNOWN_STATE: {CONF_LANG_DE: "Unbekannt", CONF_LANG_EN: "Unknown"}
+        "UNKNOWN_STATE": {CONF_LANG_DE: "Unbekannt", CONF_LANG_EN: "Unknown"}
     }
 
     def __init__(self, bridge, device_name, lang):
@@ -150,7 +150,7 @@ class HargassnerStateSensor(HargassnerSensor):
         if raw_state in self.STATES:
             self._state = self.STATES[raw_state][self._lang]
         else:
-            self._state = self.STATES[UNKNOWN_STATE][self._lang] + " (" + str(raw_state) + ")"
+            self._state = self.STATES["UNKNOWN_STATE"][self._lang] + " (" + str(raw_state) + ")"
         if raw_state == "6" or raw_state == "7":
             self._icon = "mdi:fireplace"
         else:
