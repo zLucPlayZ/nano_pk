@@ -101,6 +101,7 @@ class HargassnerDigitalParameter(HargassnerParameter):
 
 
 INTERVAL = timedelta(seconds=1)
+TIMEOUT = 30
 
 
 class HargassnerBridge:
@@ -114,6 +115,7 @@ class HargassnerBridge:
         self._expectedMsgLength = 0
         self._emptyMessages = 0
         self._malformedMessages = 0
+        self._unableToConnect = 0
         self._updateTimeoutUntil = 0
         self.set_message_format(msg_format)
         self._scheduler = BackgroundScheduler(timezone=utc)
@@ -181,7 +183,7 @@ class HargassnerBridge:
 
                 if self._emptyMessages >= 10:
                     self._emptyMessages = 0
-                    _LOGGER.warning("Connections seems broken.")
+                    _LOGGER.info("Connections seems broken.")
                     self.open_connection()
                 return
             msg = msg[last_msg_start + 3:-3].split(' ')
@@ -212,10 +214,17 @@ class HargassnerBridge:
             self._telnet.close()
             self._telnet.open(self._hostIP, timeout=20)
             self._connectionOK = True
+            self._unableToConnect = 0
             _LOGGER.info("Successfully opened connection.")
         except Exception as ex:
-            _LOGGER.warning(f"Error opening connection. Setting timeout. Exception: ({str(ex)})")
-            self._updateTimeoutUntil = int(time.time()) + 30
+            error_message = f"Error opening connection. Setting timeout of {TIMEOUT} seconds." \
+                           f" ({self._unableToConnect})\nException: ({str(ex)})"
+            if self._unableToConnect >= 5:
+                _LOGGER.warning(error_message)
+            else:
+                _LOGGER.info(error_message)
+            self._unableToConnect += 1
+            self._updateTimeoutUntil = int(time.time()) + TIMEOUT
             self._connectionOK = False
         self._scheduler.resume()
 
